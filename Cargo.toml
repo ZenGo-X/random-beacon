@@ -1,0 +1,36 @@
+[package]
+name = "random-beacon"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+sha2 = "0.8"
+round-based = "0.1"
+curve25519-dalek = "3"
+typenum = "1"
+serde = "1"
+generic-array = { version = "0.12", features = ["serde"] }
+#curv-kzen = "0.8.0-rc1"
+
+[dependencies.curv-kzen]
+git = "https://github.com/ZenGo-X/curv"
+branch = "ldei-improvements"
+default-features = false
+
+[dependencies.bls]
+git = "https://github.com/ZenGo-X/multi-party-bls"
+branch = "construct-localkey"
+default-features = false
+
+[dev-dependencies]
+bincode = "1"
+rand = { version = "0.8", features = ["small_rng"] }
+
+[dev-dependencies.round-based]
+version = "0.1"
+features = ["dev"]
+
+[features]
+default = ["curv-kzen/rust-gmp-kzen"]
