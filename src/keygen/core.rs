@@ -14,12 +14,13 @@
 //!    ```rust
 //!    # use curv::elliptic::curves::*;
 //!    # use random_beacon::keygen::core::*;
+//!    # use sha2::Sha256;
 //!    # fn main() -> Result<(), InvalidSetup> {
 //!    # let party_sk = Scalar::random();
 //!    # let random_point = || Point::generator() * Scalar::random();
 //!    # let parties_pk = vec![Point::generator() * &party_sk, random_point(), random_point()];
 //!    # let t = 1;
-//!    let setup = ProtocolSetup::<Secp256k1>::new(party_sk, parties_pk, t)?;
+//!    let setup = ProtocolSetup::<Secp256k1, Sha256>::new(party_sk, parties_pk, t)?;
 //!    # Ok(()) }
 //!    ```
 //!
@@ -31,7 +32,7 @@
 //!    # use curv::elliptic::curves::*;
 //!    # use curv::cryptographic_primitives::secret_sharing::Polynomial;
 //!    # use random_beacon::keygen::core::*;
-//!    # let setup: ProtocolSetup<Secp256k1> = unimplemented!();
+//!    # let setup: ProtocolSetup<Secp256k1, sha2::Sha256> = unimplemented!();
 //!    #
 //!    let s = Scalar::<Secp256k1>::random();
 //!    let f = Polynomial::sample_exact_with_fixed_const_term(setup.t, s);
@@ -43,7 +44,7 @@
 //!    # use random_beacon::keygen::core::*;
 //!    # fn publish<T>(_: T) {}
 //!    # fn main() -> Result<(), ShareLocalSecretError> {
-//!    # let (setup, f): (ProtocolSetup<Secp256k1>, Polynomial<Secp256k1>) = unimplemented!();
+//!    # let (setup, f): (ProtocolSetup<Secp256k1, sha2::Sha256>, Polynomial<Secp256k1>) = unimplemented!();
 //!    let encrypted_shares = share_local_secret(&setup, &f)?;
 //!    publish(&encrypted_shares);
 //!    # Ok(()) }
@@ -64,7 +65,7 @@
 //!    # fn publish<T>(_: T) {}
 //!    # fn receive<T>() -> T { unimplemented!() }
 //!    # fn main() -> Result<(), ProcessComplaintsError> {
-//!    # let (setup, mut disqualified, f): (_, _, Polynomial<Secp256k1>) = unimplemented!();
+//!    # let (setup, mut disqualified, f): (ProtocolSetup<_, sha2::Sha256>, _, Polynomial<Secp256k1>) = unimplemented!();
 //!    let complaints: Msgs<Complaints> = receive();
 //!    let (justification, justification_required_for) =
 //!        process_complaints(&setup, &f, &mut disqualified, &complaints)?;
@@ -84,7 +85,7 @@
 //!    # fn publish<T>(_: T) {}
 //!    # fn receive<T>() -> T { unimplemented!() }
 //!    # fn main() -> Result<(), ProcessJustificationError> {
-//!    # let (setup, mut disqualified, justification_required_for, encrypted_shares): (_, _, JustificationRequiredFor, Msgs<EncryptedSecretShares<Secp256k1>>) = unimplemented!();
+//!    # let (setup, mut disqualified, justification_required_for, encrypted_shares): (_, _, JustificationRequiredFor, Msgs<EncryptedSecretShares<Secp256k1, sha2::Sha256>>) = unimplemented!();
 //!    if !justification_required_for.is_empty() {
 //!        let justifications: Msgs<Justification<Secp256k1>> = receive();
 //!        process_justifications(&setup, &mut disqualified, &justification_required_for, &encrypted_shares, &justifications)?;
@@ -95,7 +96,7 @@
 //!    ```rust,no_run
 //!    # use random_beacon::keygen::core::*;
 //!    # use curv::elliptic::curves::*;
-//!    # let (setup, disqualified): (ProtocolSetup<Secp256k1>, DisqualifiedParties) = unimplemented!();
+//!    # let (setup, disqualified): (ProtocolSetup<Secp256k1, sha2::Sha256>, DisqualifiedParties) = unimplemented!();
 //!    let q = deduce_set_Q(setup.n, &disqualified);
 //!    ```
 //!    And filter out encrypted and decrypted shares (from step 3) from shares
@@ -103,7 +104,7 @@
 //!    ```rust,no_run
 //!    # use curv::elliptic::curves::*;
 //!    # use random_beacon::keygen::core::*;
-//!    # let (encrypted_shares, decrypted_shares, disqualified, setup): (Vec<Option<EncryptedSecretShares<Secp256k1>>>, Vec<Option<DecryptedSecretShare<Secp256k1>>>, _, ProtocolSetup<Secp256k1>) = unimplemented!();
+//!    # let (encrypted_shares, decrypted_shares, disqualified, setup): (Vec<Option<EncryptedSecretShares<Secp256k1, sha2::Sha256>>>, Vec<Option<DecryptedSecretShare<Secp256k1>>>, _, ProtocolSetup<Secp256k1, sha2::Sha256>) = unimplemented!();
 //!    let encrypted_shares = filter_out_disqualified(encrypted_shares, setup.n, &disqualified);
 //!    let decrypted_shares = filter_out_disqualified(decrypted_shares, setup.n, &disqualified);
 //!    ```
@@ -116,7 +117,7 @@
 //!    # use curv::elliptic::curves::*;
 //!    # fn publish<T>(_: T) {}
 //!    # fn main() -> Result<(), ConstructAndCommitLocalSecretError> {
-//!    # let (setup, q, decrypted_shares): (_, _, Vec<DecryptedSecretShare<Secp256k1>>) = unimplemented!();
+//!    # let (setup, q, decrypted_shares): (ProtocolSetup<_, sha2::Sha256>, _, Vec<DecryptedSecretShare<Secp256k1>>) = unimplemented!();
 //!    let (local_secret, committed_secret) =
 //!        construct_and_commit_local_secret(&setup, &q, &decrypted_shares)?;
 //!    publish(&committed_secret);
@@ -127,11 +128,12 @@
 //!    ```rust,no_run
 //!    # use random_beacon::keygen::core::*;
 //!    # use curv::elliptic::curves::*;
+//!    # use sha2::Sha256;
 //!    # fn publish<T>(_: T) {}
 //!    # fn receive<T>() -> T { unimplemented!() }
 //!    # fn main() -> Result<(), ConstructTpkError> {
-//!    # let (setup, q, encrypted_shares): (_, _, Vec<EncryptedSecretShares<Secp256k1>>) = unimplemented!();
-//!    let commitments: Msgs<CommittedLocalPartySecret<Secp256k1>> =
+//!    # let (setup, q, encrypted_shares): (_, _, Vec<EncryptedSecretShares<Secp256k1, Sha256>>) = unimplemented!();
+//!    let commitments: Msgs<CommittedLocalPartySecret<Secp256k1, Sha256>> =
 //!        receive();
 //!    let (tpk, set_i) = verify_commitments_and_construct_tpk(
 //!        &setup,
@@ -147,7 +149,7 @@
 //!    ```rust,no_run
 //!    # use curv::elliptic::curves::*;
 //!    # use random_beacon::keygen::core::*;
-//!    # let (setup, set_i, local_secret, tpk, committed_secret): (_, Vec<_>, LocalPartySecret<Secp256k1>, _, Msgs<CommittedLocalPartySecret<_>>) = unimplemented!();
+//!    # let (setup, set_i, local_secret, tpk, committed_secret): (ProtocolSetup<_, sha2::Sha256>, Vec<_>, LocalPartySecret<Secp256k1>, _, Msgs<CommittedLocalPartySecret<_, sha2::Sha256>>) = unimplemented!();
 //!    let partial_pk = msgs_subset(
 //!        committed_secret.iter().map(|m| m.as_ref().map(|m| &m.S)),
 //!        &set_i
@@ -187,17 +189,17 @@ use curv::cryptographic_primitives::hashing::{Digest, DigestExt};
 use curv::cryptographic_primitives::proofs::low_degree_exponent_interpolation::{
     InvalidLdeiStatement, LdeiProof, LdeiStatement, LdeiWitness,
 };
-use curv::cryptographic_primitives::secret_sharing::Polynomial;
+use curv::cryptographic_primitives::secret_sharing::{Polynomial, PolynomialDegree};
 use curv::elliptic::curves::{Curve, Point, Scalar};
+use curv::BigInt;
 
 use crate::elgamal::{
     ElgamalDecrypt, ElgamalLocalShare, ElgamalPartialPublicKey, ElgamalPublicKey,
 };
 use crate::utils::IteratorExt;
-use curv::BigInt;
 
 /// Protocol setup parameters
-pub struct ProtocolSetup<E: Curve> {
+pub struct ProtocolSetup<E: Curve, H: Digest + Clone> {
     /// Local party private key
     pub sk_i: Scalar<E>,
     /// Local party public key
@@ -211,9 +213,11 @@ pub struct ProtocolSetup<E: Curve> {
     pub t: u16,
     /// Index of local party (`pk[i] == pk_i`)
     pub i: u16,
+
+    pub _hash_choice: curv::HashChoice<H>,
 }
 
-impl<E: Curve> ProtocolSetup<E> {
+impl<E: Curve, H: Digest + Clone> ProtocolSetup<E, H> {
     /// Constructs protocol setup from local party's private key, list of parties public keys, and
     /// protocol threshold value
     ///
@@ -246,6 +250,7 @@ impl<E: Curve> ProtocolSetup<E> {
             t,
             n,
             i,
+            _hash_choice: curv::HashChoice::new(),
         })
     }
 }
@@ -267,7 +272,7 @@ pub enum InvalidSetup {
 /// Secret is divided into `n` pieces, i-th share is encrypted via public key of i-th party.
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct EncryptedSecretShares<E: Curve> {
+pub struct EncryptedSecretShares<E: Curve, H: Digest + Clone> {
     /// Committed secret shares
     ///
     /// `Ŝ_i = σ_i * pk_i`
@@ -275,7 +280,7 @@ pub struct EncryptedSecretShares<E: Curve> {
     /// Proof that secret was correctly shared
     ///
     /// `π = LDEI (pk_i, Ŝ_i, t)`
-    pub π: LdeiProof<E>,
+    pub π: LdeiProof<E, H>,
     /// Encrypted secret shares
     ///
     /// `E_i = σ_i ⊕ H(σ_i G)`
@@ -296,12 +301,13 @@ pub struct EncryptedSecretShares<E: Curve> {
 ///   for every party (encrypted with party public key). Should be published on bulletin board.
 /// * `Vec<EncryptionMaterials<E>>` that must be kept in secret until it's needed to be revealed in
 ///   the protocol
-pub fn share_local_secret<E: Curve>(
-    setup: &ProtocolSetup<E>,
+pub fn share_local_secret<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
     f: &Polynomial<E>,
-) -> Result<EncryptedSecretShares<E>, ShareLocalSecretError> {
+) -> Result<EncryptedSecretShares<E, H>, ShareLocalSecretError> {
     // 0. Validate input
-    if f.degree() > setup.t {
+    // TODO: I should be able to write `f.degree().is_finite() && f.degree() > setup.t`
+    if matches!(f.degree(), PolynomialDegree::Finite(d) if d > setup.t) {
         return Err(ShareLocalSecretError::PolynomialDegreeTooBig {
             degree: f.degree(),
             expected_degree_at_most: setup.t,
@@ -324,7 +330,7 @@ pub fn share_local_secret<E: Curve>(
         x: Ŝ.clone(),
         d: setup.t,
     };
-    let π = LdeiProof::prove::<Sha256>(&LdeiWitness { w: f.clone() }, &ldei_stmt)
+    let π = LdeiProof::prove(&LdeiWitness { w: f.clone() }, &ldei_stmt)
         .map_err(ShareLocalSecretError::CannotProveLdei)?;
 
     // 3. Encrypt σ_i for party i using its public key pk_i
@@ -348,7 +354,7 @@ pub fn share_local_secret<E: Curve>(
 pub enum ShareLocalSecretError {
     CannotProveLdei(InvalidLdeiStatement),
     PolynomialDegreeTooBig {
-        degree: u16,
+        degree: PolynomialDegree,
         expected_degree_at_most: u16,
     },
     MismatchedLengthOfEncryptionRandomness {
@@ -433,10 +439,10 @@ pub enum ComplaintReason {
 ///
 /// List of complaints should be published on bulletin board.
 // TODO: validate_and_decrypt_shares
-pub fn decrypt_shares<E: Curve>(
-    setup: &ProtocolSetup<E>,
+pub fn decrypt_shares<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
     disqualified: &mut DisqualifiedParties,
-    encrypted_shares: &Msgs<EncryptedSecretShares<E>>,
+    encrypted_shares: &Msgs<EncryptedSecretShares<E, H>>,
 ) -> Result<(Vec<Option<DecryptedSecretShare<E>>>, Complaints), MismatchedNumberOfMsgs> {
     if encrypted_shares.len() != usize::from(setup.n) {
         return Err(MismatchedNumberOfMsgs {
@@ -481,7 +487,7 @@ pub fn decrypt_shares<E: Curve>(
             x: encrypted_share.Ŝ.clone(),
             d: setup.t,
         };
-        let valid = encrypted_share.π.verify::<Sha256>(&ldei_stmt).is_ok();
+        let valid = encrypted_share.π.verify(&ldei_stmt).is_ok();
         if !valid {
             // Proof is not valid, but party will be disqualified only if t+1 parties set
             // complaint against this proof
@@ -544,8 +550,8 @@ pub type JustificationRequiredFor = HashMap<u16, Vec<u16>>;
 ///
 /// Justification message should be published on bulletin board unless
 /// `justification.encryption_materials.is_empty()`.
-pub fn process_complaints<E: Curve>(
-    setup: &ProtocolSetup<E>,
+pub fn process_complaints<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
     f: &Polynomial<E>,
     disqualified: &mut DisqualifiedParties,
     complaints: &Msgs<Complaints>,
@@ -621,11 +627,11 @@ pub enum ProcessComplaintsError {
 /// is disqualified. Otherwise, party is disqualified.
 ///
 /// This round can be skipped if `justification_required_for.is_empty()`.
-pub fn process_justifications<E: Curve>(
-    setup: &ProtocolSetup<E>,
+pub fn process_justifications<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
     disqualified: &mut DisqualifiedParties,
     justification_required_for: &JustificationRequiredFor,
-    encrypted_shares: &Msgs<EncryptedSecretShares<E>>,
+    encrypted_shares: &Msgs<EncryptedSecretShares<E, H>>,
     justifications: &Msgs<Justification<E>>,
 ) -> Result<(), ProcessJustificationError> {
     if justifications.len() != usize::from(setup.n) {
@@ -797,10 +803,10 @@ pub struct LocalPartySecret<E: Curve> {
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct CommittedLocalPartySecret<E: Curve> {
+pub struct CommittedLocalPartySecret<E: Curve, H: Digest + Clone> {
     pub S: Point<E>,
     pub Ŝ: Point<E>,
-    pub proof: LdeiProof<E>,
+    pub proof: LdeiProof<E, H>,
 }
 
 /// Constructs local party secret from secret shares received and decrypted from parties who are
@@ -812,12 +818,14 @@ pub struct CommittedLocalPartySecret<E: Curve> {
 /// `[DecryptedSecretShare<E>]`. Initially, you obtain list of secret shares from step [decrypt_shares]
 /// that returns `Vec<Option<DecryptedSecretShare<E>>>`. To filter out shares from disqualified
 /// parties, you should use [filter_out_disqualified] function.
-pub fn construct_and_commit_local_secret<E: Curve>(
-    setup: &ProtocolSetup<E>,
+pub fn construct_and_commit_local_secret<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
     Q: &HashSet<u16>,
     secret_shares: &[DecryptedSecretShare<E>],
-) -> Result<(LocalPartySecret<E>, CommittedLocalPartySecret<E>), ConstructAndCommitLocalSecretError>
-{
+) -> Result<
+    (LocalPartySecret<E>, CommittedLocalPartySecret<E, H>),
+    ConstructAndCommitLocalSecretError,
+> {
     if secret_shares.len() != Q.len() {
         return Err(
             ConstructAndCommitLocalSecretError::MismatchedNumberOfSecretShares {
@@ -840,7 +848,7 @@ pub fn construct_and_commit_local_secret<E: Curve>(
         x: vec![S.clone(), Ŝ.clone()],
         d: 0,
     };
-    let proof = LdeiProof::prove::<Sha256>(&LdeiWitness { w }, &stmt)
+    let proof = LdeiProof::prove(&LdeiWitness { w }, &stmt)
         .map_err(ConstructAndCommitLocalSecretError::ProveDleq)?;
 
     let local_secret = LocalPartySecret { σ };
@@ -888,11 +896,11 @@ impl I2J for DefaultI2J {
 ///
 /// Outputs resulting tpk along with set I of parties who correctly committed
 /// their local secret, and set J that was used to derive `tpk`.
-pub fn verify_commitments_and_construct_tpk<E: Curve>(
-    setup: &ProtocolSetup<E>,
+pub fn verify_commitments_and_construct_tpk<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
     Q: &HashSet<u16>,
-    encrypted_shares: &[EncryptedSecretShares<E>],
-    secret_commitments: &Msgs<CommittedLocalPartySecret<E>>,
+    encrypted_shares: &[EncryptedSecretShares<E, H>],
+    secret_commitments: &Msgs<CommittedLocalPartySecret<E, H>>,
     i2j: impl I2J,
 ) -> Result<(Point<E>, Vec<u16>), ConstructTpkError> {
     if secret_commitments.len() != usize::from(setup.n) {
@@ -937,7 +945,7 @@ pub fn verify_commitments_and_construct_tpk<E: Curve>(
             x: vec![com.S.clone(), Ŝ],
             d: 0,
         };
-        let valid = com.proof.verify::<Sha256>(&stmt).is_ok();
+        let valid = com.proof.verify(&stmt).is_ok();
         if !valid {
             // Party's commitment proof is not valid => it won't be included to set I
             continue;
@@ -970,13 +978,17 @@ pub fn verify_commitments_and_construct_tpk<E: Curve>(
     Ok((tpk, I))
 }
 
-pub fn construct_elgamal_keys<E: Curve>(
-    setup: &ProtocolSetup<E>,
+pub fn construct_elgamal_keys<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
     I: &[u16],
     partial_tpk: &[Point<E>],
     tsk_i: LocalPartySecret<E>,
     tpk: Point<E>,
-) -> (ElgamalLocalShare<E>, ElgamalDecrypt<E>, ElgamalPublicKey<E>) {
+) -> (
+    ElgamalLocalShare<E, H>,
+    ElgamalDecrypt<E>,
+    ElgamalPublicKey<E>,
+) {
     assert_eq!(I.len(), partial_tpk.len());
     let q = I
         .iter()
@@ -1018,8 +1030,8 @@ pub enum ConstructTpkError {
 /// # use curv::cryptographic_primitives::proofs::low_degree_exponent_interpolation::LdeiProof;
 /// # use curv::cryptographic_primitives::secret_sharing::Polynomial;
 /// # let random_point = || Point::generator() * Scalar::random();
-/// # let dummy_proof = || LdeiProof{ a: vec![], e: Scalar::random(), z: Polynomial::sample_exact(0)};
-/// # let secret_com_i = || CommittedLocalPartySecret::<Secp256k1> {S: random_point(), Ŝ: random_point(), proof: dummy_proof()};
+/// # let dummy_proof = || LdeiProof{ a: vec![], e: Scalar::random(), z: Polynomial::sample_exact(0), hash_choice: curv::HashChoice::<sha2::Sha256>::new() };
+/// # let secret_com_i = || CommittedLocalPartySecret::<Secp256k1, sha2::Sha256> {S: random_point(), Ŝ: random_point(), proof: dummy_proof()};
 /// # let (secret_com1, secret_com2, secret_com3) = (secret_com_i(), secret_com_i(), secret_com_i());
 /// use random_beacon::keygen::core::*;
 /// // Let `msgs` be a list of committed parties' local secrets (that includes parties' partial public keys)

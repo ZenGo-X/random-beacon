@@ -3,7 +3,7 @@
 //! ## Setup
 //!
 //! 1. Initial seed $σ_0$
-//! 2. Random oracle $H$ (we fix it to sha2_512)
+//! 2. Random oracle $H$ (eg. sha2_512)
 //!
 //! ## Protocol
 //!
@@ -36,13 +36,14 @@
 //! ```rust,no_run
 //! # use random_beacon::tier3::core::*;
 //! # use random_beacon::vrf::*;
+//! # use sha2::Sha512;
 //! # fn receive<T>() -> T { unimplemented!() }
 //! # fn main() -> Result<(), InvalidSetup> {
-//! # let sk_i = SecretKey::generate();
+//! let sk_i = SecretKey::generate();
 //! #
 //! let pk: Vec<PublicKey> = receive();
 //! let rounds_limit = 25; // any reasonable limit is fine
-//! let setup = ProtocolSetup::new(sk_i, pk, rounds_limit);
+//! let setup = ProtocolSetup::<Sha512>::new(sk_i, pk, rounds_limit);
 //! #
 //! # Ok(()) }
 //! ```
@@ -58,7 +59,7 @@
 //! # use random_beacon::vrf::*;
 //! # fn publish<T>(_: &T) {}
 //! # fn main() -> Result<(), ProceedError> {
-//! # let (setup, seed) = unimplemented!();
+//! # let (setup, seed): (ProtocolSetup<sha2::Sha512>, _) = unimplemented!();
 //! #
 //! let local_randomness = proceed_locally(&setup, &seed)?;
 //! publish(&local_randomness);
@@ -71,11 +72,12 @@
 //! ```rust,no_run
 //! # use random_beacon::tier3::core::*;
 //! # use random_beacon::vrf::*;
+//! # use sha2::Sha512;
 //! # fn receive<T>() -> T { unimplemented!() }
 //! # fn main() -> Result<(), CombineError> {
-//! # let (setup, mut seed) = unimplemented!();
+//! # let (setup, mut seed): (ProtocolSetup<Sha512>, _) = unimplemented!();
 //! #
-//! let board = receive::<Msgs<VerifiableRandomness>>();
+//! let board = receive::<Msgs<VerifiableRandomness<Sha512>>>();
 //! let (randomness, next_seed) = combine(&setup, seed, &board)?;
 //! seed = next_seed;
 //! #
@@ -85,13 +87,14 @@
 //! Repeat step 3 until you reach rounds limit.
 
 use sha2::{Digest, Sha512};
+use typenum::U64;
 
 use crate::vrf::{PublicKey, SecretKey, VerifiableRandomness};
 
 pub use crate::tier1::core::Msgs;
 
 #[derive(Clone)]
-pub struct ProtocolSetup {
+pub struct ProtocolSetup<H: Digest<OutputSize = U64> + Clone> {
     /// List of parties' public keys
     ///
     /// $pk_i$ corresponds to public key of $\ith$ party
@@ -104,9 +107,11 @@ pub struct ProtocolSetup {
     ///
     /// After exceeding round limit, parties must regenerate secret keys and issue new randomness seed
     pub rounds_limit: u16,
+
+    pub _hash_choice: curv::HashChoice<H>,
 }
 
-impl ProtocolSetup {
+impl<H: Digest<OutputSize = U64> + Clone> ProtocolSetup<H> {
     pub fn new(
         sk_i: SecretKey,
         pk: Vec<PublicKey>,
@@ -123,6 +128,7 @@ impl ProtocolSetup {
             pk,
             sk_i,
             rounds_limit,
+            _hash_choice: curv::HashChoice::new(),
         })
     }
 }
@@ -146,10 +152,10 @@ impl Tier3Seed {
 }
 
 /// Applies VRF locally producing verifiable local randomness that should be published on board
-pub fn proceed_locally(
-    setup: &ProtocolSetup,
+pub fn proceed_locally<H: Digest<OutputSize = U64> + Clone>(
+    setup: &ProtocolSetup<H>,
     seed: &Tier3Seed,
-) -> Result<VerifiableRandomness, ProceedError> {
+) -> Result<VerifiableRandomness<H>, ProceedError> {
     if setup.rounds_limit == seed.r {
         return Err(ProceedError::RoundsLimitExceeded {
             limit: setup.rounds_limit,
@@ -160,7 +166,7 @@ pub fn proceed_locally(
     m[..2].copy_from_slice(&(seed.r + 1).to_be_bytes());
     m[2..].copy_from_slice(&seed.seed);
 
-    Ok(setup.sk_i.eval::<Sha512>(&m))
+    Ok(setup.sk_i.eval::<H>(&m))
 }
 
 #[derive(Clone, Debug)]
@@ -169,10 +175,10 @@ pub enum ProceedError {
 }
 
 /// Verifies and combines randomness evaluated by every party and published on board
-pub fn combine(
-    setup: &ProtocolSetup,
+pub fn combine<H: Digest<OutputSize = U64> + Clone>(
+    setup: &ProtocolSetup<H>,
     seed: Tier3Seed,
-    board: &Msgs<VerifiableRandomness>,
+    board: &Msgs<VerifiableRandomness<H>>,
 ) -> Result<([u8; 64], Tier3Seed), CombineError> {
     if setup.pk.len() != board.len() {
         return Err(CombineError::MismatchedNumberOfMsgs {
@@ -198,7 +204,7 @@ pub fn combine(
         .zip(board)
         .flat_map(|(pk_i, msg)| Some((pk_i, msg.as_ref()?)))
     {
-        if rnd.verify::<Sha512>(pk_i, &m).is_ok() {
+        if rnd.verify(pk_i, &m).is_ok() {
             result_randomness
                 .iter_mut()
                 .zip(rnd.randomness())

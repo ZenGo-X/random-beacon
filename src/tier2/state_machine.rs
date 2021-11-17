@@ -72,7 +72,7 @@ impl StateMachine for NextRand {
             Ok(sig) => sig.1,
             Err(e) => return Some(Err(e)),
         };
-        let rnd = Sha256::new().chain_point(&sig.sigma).result();
+        let rnd = Sha256::new().chain_point(&sig.sigma).finalize();
         let next_seed = Tier2Seed {
             r: self.r + 1,
             seed: sig.sigma.to_bytes(true).to_vec(),

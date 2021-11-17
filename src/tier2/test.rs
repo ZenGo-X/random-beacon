@@ -3,13 +3,14 @@ use std::time::Duration;
 
 use curv::elliptic::curves::*;
 use round_based::dev::Simulation;
+use sha2::Sha256;
 
 use crate::keygen::tests::KeygenSimulation;
 use crate::tier2::state_machine::{LocalKey, NextRand, Tier2Seed};
 use crate::utils::IteratorExt;
 
 fn keygen(t: u16, n: u16) -> Vec<LocalKey> {
-    let keygen = KeygenSimulation::<Bls12_381_2>::setup(t, n);
+    let keygen = KeygenSimulation::<Bls12_381_2, Sha256>::setup(t, n);
     let phase0 = keygen.phase0_generate_parties_local_secrets();
     let phase1 = keygen.phase1_share_and_commit_shares(&phase0);
     let phase2 = keygen.phase2_decrypt_shares(&phase1);

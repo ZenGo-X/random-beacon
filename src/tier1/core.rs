@@ -20,14 +20,15 @@
 //! ```rust
 //! # use curv::elliptic::curves::*;
 //! # use random_beacon::tier1::core::*;
+//! # use sha2::Sha256;
 //! # fn main() -> Result<(), InvalidSetup> {
-//! # let party_sk = Scalar::random();
+//! let party_sk = Scalar::random();
 //! # let random_point = || Point::generator() * Scalar::random();
 //! # let parties_pk = vec![Point::generator() * &party_sk, random_point(), random_point(), random_point(), random_point()];
 //! # let (n, t, l, a) = (5, 1, 3, Scalar::<Secp256k1>::random());
 //! #
 //! let matrix = ResilientMatrix::new(a, n - 2*t, n - t);
-//! let setup = ProtocolSetup::new(party_sk, parties_pk, t, l, matrix)?;
+//! let setup = ProtocolSetup::<Secp256k1, Sha256>::new(party_sk, parties_pk, t, l, matrix)?;
 //! #
 //! # Ok(()) }
 //! ```
@@ -43,7 +44,7 @@
 //! # fn publish<T>(_: &T) {}
 //! # fn main() -> Result<(), SharingError> {
 //! # use curv::cryptographic_primitives::secret_sharing::Polynomial;
-//! # let setup: ProtocolSetup<Secp256k1> = unimplemented!();
+//! # let setup: ProtocolSetup<Secp256k1, sha2::Sha256> = unimplemented!();
 //! #
 //! let f = Polynomial::sample_exact(setup.t + setup.l - 1);
 //! let shared_secret = sharing(&setup, &f)?;
@@ -62,7 +63,7 @@
 //! # use random_beacon::tier1::core::*;
 //! # fn receive<T>() -> (usize, T) { unimplemented!() }
 //! # fn main() -> Result<(), SharingError> {
-//! # let setup: ProtocolSetup<Secp256k1> = unimplemented!();
+//! # let setup: ProtocolSetup<Secp256k1, sha2::Sha256> = unimplemented!();
 //! #
 //! // shared_secrets[i] is a shared secret received from i-th party
 //! let mut shared_secrets = vec![None; usize::from(setup.n)];
@@ -95,7 +96,7 @@
 //! # fn receive<T>() -> T { unimplemented!() }
 //! # fn main() -> Result<(), OpenedSecretsVerificationError> {
 //! # use curv::cryptographic_primitives::secret_sharing::Polynomial;
-//! # let (setup, shared_secrets, f): (ProtocolSetup<Secp256k1>, Msgs<SharedSecret<_>>, Polynomial<Secp256k1>) = unimplemented!();
+//! # let (setup, shared_secrets, f): (ProtocolSetup<Secp256k1, sha2::Sha256>, Msgs<SharedSecret<_, _>>, Polynomial<Secp256k1>) = unimplemented!();
 //! #
 //! // Check if we need to reveal the secret
 //! if shared_secrets[usize::from(setup.i)].is_some() {
@@ -127,7 +128,7 @@
 //! # fn receive<T>() -> T { unimplemented!() }
 //! # fn main() -> Result<(), PartiallyOpenSecretError> {
 //! # use curv::cryptographic_primitives::secret_sharing::Polynomial;
-//! # let (setup, shared_secrets, parties_who_didnt_open_their_secrets): (ProtocolSetup<Secp256k1>, Msgs<SharedSecret<_>>, PartiesWhoDidntOpenTheirSecrets) = unimplemented!();
+//! # let (setup, shared_secrets, parties_who_didnt_open_their_secrets): (ProtocolSetup<Secp256k1, sha2::Sha256>, Msgs<SharedSecret<_, _>>, PartiesWhoDidntOpenTheirSecrets) = unimplemented!();
 //! #
 //! let mut local_partial_opened_secrets = vec![];
 //! for non_cooperative_party in parties_who_didnt_open_their_secrets {
@@ -146,16 +147,17 @@
 //! ```rust,no_run
 //! # use curv::elliptic::curves::*;
 //! # use random_beacon::tier1::core::*;
+//! # use sha2::Sha256;
 //! # fn publish<T>(_: &T) { unimplemented!() }
 //! # fn receive<T>() -> (u16, T) { unimplemented!() }
 //! # fn main() -> Result<(), OpenSharedSecretError> {
 //! # use curv::cryptographic_primitives::secret_sharing::Polynomial;
-//! # let (setup, shared_secrets, parties_who_didnt_open_their_secrets, mut correctly_opened_secrets): (ProtocolSetup<Secp256k1>, Msgs<SharedSecret<_>>, PartiesWhoDidntOpenTheirSecrets, OpenedSecrets<Secp256k1>) = unimplemented!();
+//! # let (setup, shared_secrets, parties_who_didnt_open_their_secrets, mut correctly_opened_secrets): (ProtocolSetup<Secp256k1, sha2::Sha256>, Msgs<SharedSecret<_, _>>, PartiesWhoDidntOpenTheirSecrets, OpenedSecrets<Secp256k1>) = unimplemented!();
 //! #
 //! let mut partial_reconstructions = vec![(vec![], vec![]); parties_who_didnt_open_their_secrets.len()];
 //! let mut secrets_left = parties_who_didnt_open_their_secrets.len();
 //! while secrets_left > 0 {
-//!     let (sender, partials) = receive::<Vec<PartiallyOpenedSecret<Secp256k1>>>();
+//!     let (sender, partials) = receive::<Vec<PartiallyOpenedSecret<Secp256k1, Sha256>>>();
 //!     for ((&uncooperative_party, reconstruction), partial) in parties_who_didnt_open_their_secrets.iter()
 //!         .zip(&mut partial_reconstructions)
 //!         .zip(&partials)
@@ -192,7 +194,7 @@
 //! # use random_beacon::tier1::core::*;
 //! # fn main() -> Result<(), ExtractRandomnessError> {
 //! # use curv::cryptographic_primitives::secret_sharing::Polynomial;
-//! # let (setup, correctly_opened_secrets): (ProtocolSetup<Secp256k1>, OpenedSecrets<Secp256k1>) = unimplemented!();
+//! # let (setup, correctly_opened_secrets): (ProtocolSetup<Secp256k1, sha2::Sha256>, OpenedSecrets<Secp256k1>) = unimplemented!();
 //! #
 //! let secrets_matrix = OpenedSecretsMatrix::from(correctly_opened_secrets);
 //! let randomness = extract_randomness(&setup, &secrets_matrix)?;
@@ -207,21 +209,21 @@ use std::convert::TryFrom;
 use std::ops;
 
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
 
 use curv::cryptographic_primitives::proofs::low_degree_exponent_interpolation::{
     InvalidLdeiStatement, LdeiProof, LdeiStatement, LdeiWitness,
 };
 use curv::cryptographic_primitives::proofs::ProofError;
-use curv::cryptographic_primitives::secret_sharing::Polynomial;
+use curv::cryptographic_primitives::secret_sharing::{Polynomial, PolynomialDegree};
 use curv::elliptic::curves::*;
+use sha2::Digest;
 
 use crate::utils::IteratorExt;
 
 // Re-export
 pub use crate::keygen::core::Msgs;
 
-pub struct ProtocolSetup<E: Curve> {
+pub struct ProtocolSetup<E: Curve, H: Digest + Clone> {
     /// Local party private key
     pub sk_i: Scalar<E>,
     /// Local party public key
@@ -249,9 +251,11 @@ pub struct ProtocolSetup<E: Curve> {
     pub lʹ: u16,
     /// Index of local party
     pub i: u16,
+
+    pub _hash_choice: curv::HashChoice<H>,
 }
 
-impl<E: Curve> ProtocolSetup<E> {
+impl<E: Curve, H: Digest + Clone> ProtocolSetup<E, H> {
     pub fn new(
         sk_i: Scalar<E>,
         pk: Vec<Point<E>>,
@@ -307,6 +311,8 @@ impl<E: Curve> ProtocolSetup<E> {
             t,
             l,
             lʹ,
+
+            _hash_choice: curv::HashChoice::new(),
         })
     }
 }
@@ -394,15 +400,15 @@ impl<E: Curve> ops::Index<[u16; 2]> for ResilientMatrix<E> {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct SharedSecret<E: Curve> {
+pub struct SharedSecret<E: Curve, H: Digest + Clone> {
     pub Ŝ: Vec<Point<E>>,
-    pub π: LdeiProof<E>,
+    pub π: LdeiProof<E, H>,
 }
 
 #[derive(Debug, Clone)]
 pub enum SharingError {
     MismatchedPolynomialDegree {
-        degree: u16,
+        degree: PolynomialDegree,
         expected_degree_at_most: u16,
     },
     LdeiProve(InvalidLdeiStatement),
@@ -414,10 +420,10 @@ pub enum SharingError {
 /// $s_j = f(-j), j \in \[0; \ell-1]$, produces $n$ shares $Ŝ_i = f(i) \cdot \pk_i, i \in \[1;n]$,
 /// such as any set of $t+\ell$ honest parties can recover $(s_0 G, \dots, s_{\ell-1} G)$,
 /// and also produces a proof that shares are valid.
-pub fn sharing<E: Curve>(
-    setup: &ProtocolSetup<E>,
+pub fn sharing<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
     f: &Polynomial<E>,
-) -> Result<SharedSecret<E>, SharingError> {
+) -> Result<SharedSecret<E, H>, SharingError> {
     if !(f.degree() <= setup.t + setup.l - 1) {
         return Err(SharingError::MismatchedPolynomialDegree {
             degree: f.degree(),
@@ -440,15 +446,15 @@ pub fn sharing<E: Curve>(
         d: setup.t + setup.l - 1,
     };
     let witness = LdeiWitness { w: f.clone() };
-    let π = LdeiProof::prove::<Sha256>(&witness, &stmt).map_err(SharingError::LdeiProve)?;
+    let π = LdeiProof::prove(&witness, &stmt).map_err(SharingError::LdeiProve)?;
 
     Ok(SharedSecret { Ŝ, π })
 }
 
 /// Checks if [SharedSecret] is correctly shared by checking the proof
-pub fn is_secret_correctly_shared<E: Curve>(
-    setup: &ProtocolSetup<E>,
-    shared_secret: &SharedSecret<E>,
+pub fn is_secret_correctly_shared<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
+    shared_secret: &SharedSecret<E, H>,
 ) -> Result<(), ProofError> {
     let stmt = LdeiStatement {
         alpha: (1..=setup.n).map(Scalar::from).collect(),
@@ -457,7 +463,7 @@ pub fn is_secret_correctly_shared<E: Curve>(
         d: setup.t + setup.l - 1,
     };
 
-    shared_secret.π.verify::<Sha256>(&stmt)
+    shared_secret.π.verify(&stmt)
 }
 
 pub type OpenedSecrets<E> = BTreeMap<u16, OpenedSecret<E>>;
@@ -480,9 +486,9 @@ pub enum OpenedSecretsVerificationError {
 /// Note that `shared_secrets` must contain exactly $n - t$ valid shares (first $n - t$ valid shares
 /// posted on board), messages from other parties must be `None` (even if they published valid shares,
 /// but didn't manage to do it quick enough)
-pub fn validate_opened_secrets<E: Curve>(
-    setup: &ProtocolSetup<E>,
-    shared_secrets: &Msgs<SharedSecret<E>>,
+pub fn validate_opened_secrets<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
+    shared_secrets: &Msgs<SharedSecret<E, H>>,
     opened_secrets: &Msgs<Polynomial<E>>,
     correctly_opened_secrets: &mut OpenedSecrets<E>,
 ) -> Result<PartiesWhoDidntOpenTheirSecrets, OpenedSecretsVerificationError> {
@@ -545,9 +551,9 @@ pub fn validate_opened_secrets<E: Curve>(
 /// Secret can be recovered from any set of valid $t + \ell$ distinct partial openings
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(bound = "")]
-pub struct PartiallyOpenedSecret<E: Curve> {
+pub struct PartiallyOpenedSecret<E: Curve, H: Digest + Clone> {
     pub S: Point<E>,
-    pub π: LdeiProof<E>,
+    pub π: LdeiProof<E, H>,
 }
 
 #[derive(Debug, Clone)]
@@ -558,10 +564,10 @@ pub enum PartiallyOpenSecretError {
 }
 
 /// Partially opens a correctly shared secret
-pub fn partially_open_secret<E: Curve>(
-    setup: &ProtocolSetup<E>,
-    shared_secret: &SharedSecret<E>,
-) -> Result<PartiallyOpenedSecret<E>, PartiallyOpenSecretError> {
+pub fn partially_open_secret<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
+    shared_secret: &SharedSecret<E, H>,
+) -> Result<PartiallyOpenedSecret<E, H>, PartiallyOpenSecretError> {
     let sk_i_inv = setup
         .sk_i
         .invert()
@@ -579,8 +585,8 @@ pub fn partially_open_secret<E: Curve>(
         x: vec![setup.pk_i.clone(), Ŝ_i.clone()],
         d: 0,
     };
-    let π = LdeiProof::prove::<Sha256>(&LdeiWitness { w }, &stmt)
-        .map_err(PartiallyOpenSecretError::LdeiProve)?;
+    let π =
+        LdeiProof::prove(&LdeiWitness { w }, &stmt).map_err(PartiallyOpenSecretError::LdeiProve)?;
 
     Ok(PartiallyOpenedSecret { S: S_i, π })
 }
@@ -592,11 +598,11 @@ pub enum InvalidPartialOpening {
 }
 
 /// Verifies correctness of partial opening
-pub fn validate_partially_opened_secret<E: Curve>(
-    setup: &ProtocolSetup<E>,
+pub fn validate_partially_opened_secret<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
     party_i: u16,
-    shared_secret: &SharedSecret<E>,
-    partially_opened: &PartiallyOpenedSecret<E>,
+    shared_secret: &SharedSecret<E, H>,
+    partially_opened: &PartiallyOpenedSecret<E, H>,
 ) -> Result<(), InvalidPartialOpening> {
     if party_i >= setup.n {
         return Err(InvalidPartialOpening::PartyIndexOutOfRange {
@@ -619,7 +625,7 @@ pub fn validate_partially_opened_secret<E: Curve>(
     };
     partially_opened
         .π
-        .verify::<Sha256>(&stmt)
+        .verify(&stmt)
         .or(Err(InvalidPartialOpening::ProofError))
 }
 
@@ -632,10 +638,10 @@ pub enum OpenSharedSecretError {
 /// Opens committed secrets from $t+\ell$ partial openings
 ///
 /// Assumes that partial openings are verified to be valid using [validate_partially_opened_secret].
-pub fn open_shared_secret<E: Curve>(
-    setup: &ProtocolSetup<E>,
+pub fn open_shared_secret<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
     parties_who_provided_partial_openings: &[u16],
-    partial_openings: &[PartiallyOpenedSecret<E>],
+    partial_openings: &[PartiallyOpenedSecret<E, H>],
 ) -> Result<OpenedSecret<E>, OpenSharedSecretError> {
     if parties_who_provided_partial_openings.len() != usize::from(setup.t + setup.l) {
         return Err(OpenSharedSecretError::MismatchedNumberOfParties {
@@ -729,8 +735,8 @@ pub enum ExtractRandomnessError {
 }
 
 /// Extracts randomness from matrix of correctly opened secrets
-pub fn extract_randomness<E: Curve>(
-    setup: &ProtocolSetup<E>,
+pub fn extract_randomness<E: Curve, H: Digest + Clone>(
+    setup: &ProtocolSetup<E, H>,
     secrets: &OpenedSecretsMatrix<E>,
 ) -> Result<Vec<Point<E>>, ExtractRandomnessError> {
     if !(secrets.height() == setup.n - setup.t && secrets.width() == setup.l) {

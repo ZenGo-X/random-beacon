@@ -7,17 +7,17 @@ license = "GPL-3.0-or-later"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-sha2 = "0.8"
+sha2 = "0.9"
 round-based = "0.1"
 curve25519-dalek = "3"
 typenum = "1"
 serde = "1"
-generic-array = { version = "0.12", features = ["serde"] }
+generic-array = { version = "0.14", features = ["serde"] }
+phantom-type = "0.3"
 #curv-kzen = "0.8.0-rc1"
 
 [dependencies.curv-kzen]
-git = "https://github.com/ZenGo-X/curv"
-branch = "ldei-improvements"
+version = "0.9"
 default-features = false
 
 [dependencies.bls]
@@ -35,3 +35,7 @@ features = ["dev"]
 
 [features]
 default = ["curv-kzen/rust-gmp-kzen"]
+
+[patch.crates-io.curv-kzen]
+git = "https://github.com/ZenGo-X/curv"
+branch = "polynomial"

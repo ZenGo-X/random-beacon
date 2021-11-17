@@ -1,10 +1,12 @@
 use std::collections::HashSet;
 use std::iter::FromIterator;
+use std::time::{Duration, Instant};
 use std::{iter, ops};
 
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
+use sha2::{Digest, Sha256};
 
 use curv::arithmetic::*;
 use curv::cryptographic_primitives::secret_sharing::Polynomial;
@@ -13,16 +15,15 @@ use curv::elliptic::curves::*;
 use crate::elgamal::{ElgamalDecrypt, ElgamalLocalShare, ElgamalPublicKey};
 use crate::keygen::core::*;
 use crate::utils::IteratorExt;
-use std::time::{Duration, Instant};
 
-pub struct KeygenSimulation<E: Curve> {
-    parties: Vec<ProtocolSetup<E>>,
+pub struct KeygenSimulation<E: Curve, H: Digest + Clone> {
+    parties: Vec<ProtocolSetup<E, H>>,
     t: u16,
     n: u16,
     pk: Vec<Point<E>>,
 }
 
-impl<E: Curve> KeygenSimulation<E> {
+impl<E: Curve, H: Digest + Clone + 'static> KeygenSimulation<E, H> {
     pub fn setup(t: u16, n: u16) -> Self {
         let sk = iter::repeat_with(|| Scalar::<E>::random())
             .take(usize::from(n))
@@ -55,7 +56,7 @@ impl<E: Curve> KeygenSimulation<E> {
     pub fn phase1_share_and_commit_shares(
         &self,
         phase0: &Phase0GeneratedLocalSecrets<E>,
-    ) -> Phase1SharedAndCommittedSecret<E> {
+    ) -> Phase1SharedAndCommittedSecret<E, H> {
         let mut encrypted_shares = vec![];
         let mut took = vec![];
 
@@ -78,7 +79,7 @@ impl<E: Curve> KeygenSimulation<E> {
 
     pub fn phase2_decrypt_shares(
         &self,
-        phase1: &Phase1SharedAndCommittedSecret<E>,
+        phase1: &Phase1SharedAndCommittedSecret<E, H>,
     ) -> Phase2DecryptedShares<E> {
         let mut disqualified = vec![];
         let mut complaints = vec![];
@@ -152,7 +153,7 @@ impl<E: Curve> KeygenSimulation<E> {
 
     pub fn phase4_process_justifications(
         &self,
-        phase1: &Phase1SharedAndCommittedSecret<E>,
+        phase1: &Phase1SharedAndCommittedSecret<E, H>,
         phase3: &Phase3PublishedJustifications<E>,
     ) -> Phase4ProcessedJustifications {
         let mut disqualified = vec![];
@@ -198,11 +199,11 @@ impl<E: Curve> KeygenSimulation<E> {
 
     pub fn phase5_deduce_set_Q(
         &self,
-        phase1: &Phase1SharedAndCommittedSecret<E>,
+        phase1: &Phase1SharedAndCommittedSecret<E, H>,
         phase2: &Phase2DecryptedShares<E>,
         phase3: Option<&Phase3PublishedJustifications<E>>,
         phase4: Option<&Phase4ProcessedJustifications>,
-    ) -> Phase5SetQ<E> {
+    ) -> Phase5SetQ<E, H> {
         let mut Q = vec![];
         let mut encrypted_shares = vec![];
         let mut decrypted_shares = vec![];
@@ -244,8 +245,8 @@ impl<E: Curve> KeygenSimulation<E> {
 
     pub fn phase6_construct_and_commit_local_secret(
         &self,
-        phase5: &Phase5SetQ<E>,
-    ) -> Phase6ConstructedAndCommittedLocalSecret<E> {
+        phase5: &Phase5SetQ<E, H>,
+    ) -> Phase6ConstructedAndCommittedLocalSecret<E, H> {
         let mut parties_secrets = vec![];
         let mut committed_parties_secrets = vec![];
         let mut board = vec![];
@@ -276,8 +277,8 @@ impl<E: Curve> KeygenSimulation<E> {
 
     pub fn phase7_validate_shares_commitments(
         &self,
-        phase5: &Phase5SetQ<E>,
-        phase6: &Phase6ConstructedAndCommittedLocalSecret<E>,
+        phase5: &Phase5SetQ<E, H>,
+        phase6: &Phase6ConstructedAndCommittedLocalSecret<E, H>,
     ) -> Phase7ValidatedPartiesShares<E> {
         self.phase7_validate_shares_commitments_with_i2j(
             phase5,
@@ -288,8 +289,8 @@ impl<E: Curve> KeygenSimulation<E> {
 
     pub fn phase7_validate_shares_commitments_with_i2j(
         &self,
-        phase5: &Phase5SetQ<E>,
-        phase6: &Phase6ConstructedAndCommittedLocalSecret<E>,
+        phase5: &Phase5SetQ<E, H>,
+        phase6: &Phase6ConstructedAndCommittedLocalSecret<E, H>,
         i2j: &[impl I2J],
     ) -> Phase7ValidatedPartiesShares<E> {
         let mut tpk = vec![];
@@ -316,10 +317,10 @@ impl<E: Curve> KeygenSimulation<E> {
 
     pub fn phase8_construct_elgamal_keys(
         &self,
-        phase6: &Phase6ConstructedAndCommittedLocalSecret<E>,
+        phase6: &Phase6ConstructedAndCommittedLocalSecret<E, H>,
         phase7: &Phase7ValidatedPartiesShares<E>,
     ) -> (
-        Vec<ElgamalLocalShare<E>>,
+        Vec<ElgamalLocalShare<E, H>>,
         ElgamalDecrypt<E>,
         ElgamalPublicKey<E>,
     ) {
@@ -359,8 +360,8 @@ impl<E: Curve> KeygenSimulation<E> {
     }
 }
 
-impl<E: Curve> ops::Index<u16> for KeygenSimulation<E> {
-    type Output = ProtocolSetup<E>;
+impl<E: Curve, H: Digest + Clone> ops::Index<u16> for KeygenSimulation<E, H> {
+    type Output = ProtocolSetup<E, H>;
     fn index(&self, index: u16) -> &Self::Output {
         self.parties.get(usize::from(index)).unwrap()
     }
@@ -378,14 +379,14 @@ pub struct Phase0GeneratedLocalSecrets<E: Curve> {
     pub took: Vec<Duration>,
 }
 
-pub struct Phase1SharedAndCommittedSecret<E: Curve> {
+pub struct Phase1SharedAndCommittedSecret<E: Curve, H: Digest + Clone> {
     /// `encrypted_shares[i]` is a message that i-th party supposed to publish on board
-    pub encrypted_shares: Vec<EncryptedSecretShares<E>>,
+    pub encrypted_shares: Vec<EncryptedSecretShares<E, H>>,
 
     /// List of messages that was published on bulletin board. `board[i]` is a message
     /// published by i-th party. `board[i]` being `None` means that i-th party didn't
     /// manage to publish its message in time.
-    pub board: Msgs<EncryptedSecretShares<E>>,
+    pub board: Msgs<EncryptedSecretShares<E, H>>,
 
     /// $\text{took}_i$ shows how much time it took for $\ith$ party to complete this phase
     pub took: Vec<Duration>,
@@ -439,12 +440,12 @@ pub struct Phase4ProcessedJustifications {
     pub took: Vec<Duration>,
 }
 
-pub struct Phase5SetQ<E: Curve> {
+pub struct Phase5SetQ<E: Curve, H: Digest + Clone> {
     /// `Q[i]` is a set of parties who didn't get disqualified from i-th party perspective
     pub Q: Vec<HashSet<u16>>,
     /// `encrypted_shares[i]` is a list of messages sent at [phase1_share_and_commit_shares](KeygenSimulation::phase1_share_and_commit_shares)
     /// and received by i-th party, filtered out from messages sent by parties that do not belong to set `Q[i]`
-    pub encrypted_shares: Vec<Vec<EncryptedSecretShares<E>>>,
+    pub encrypted_shares: Vec<Vec<EncryptedSecretShares<E, H>>>,
     /// `decrypted_shares[i]` is a list of decrypted shares obtained at [phase2_decrypt_shares](KeygenSimulation::phase2_decrypt_shares)
     /// by i-th party, filtered out from shares sent by parties that do not belong to set `Q[i]`
     pub decrypted_shares: Vec<Vec<DecryptedSecretShare<E>>>,
@@ -453,16 +454,16 @@ pub struct Phase5SetQ<E: Curve> {
     pub took: Vec<Duration>,
 }
 
-pub struct Phase6ConstructedAndCommittedLocalSecret<E: Curve> {
+pub struct Phase6ConstructedAndCommittedLocalSecret<E: Curve, H: Digest + Clone> {
     /// `parties_secrets[i]` is a local secret of i-th party
     pub parties_secrets: Vec<LocalPartySecret<E>>,
     /// `committed_parties_secrets[i]` is a proof that `parties_secrets[i]` was correctly constructed
-    pub committed_parties_secrets: Vec<CommittedLocalPartySecret<E>>,
+    pub committed_parties_secrets: Vec<CommittedLocalPartySecret<E, H>>,
 
     /// List of messages that was published on bulletin board. `board[i]` is a
     /// message published by i-th party. `board[i]` being `None` means that i-th
     /// party didn't manage to publish its message in time.
-    pub board: Msgs<CommittedLocalPartySecret<E>>,
+    pub board: Msgs<CommittedLocalPartySecret<E, H>>,
 
     /// $\text{took}_i$ shows how much time it took for $\ith$ party to complete this phase
     pub took: Vec<Duration>,
@@ -481,7 +482,7 @@ pub struct Phase7ValidatedPartiesShares<E: Curve> {
 
 #[test]
 fn shares_and_commits_local_secret() {
-    let setup = KeygenSimulation::<Secp256k1>::setup(1, 3);
+    let setup = KeygenSimulation::<Secp256k1, Sha256>::setup(1, 3);
 
     let s = Scalar::random();
     let f = Polynomial::sample_exact_with_fixed_const_term(setup.t, s);
@@ -491,7 +492,7 @@ fn shares_and_commits_local_secret() {
 
 #[test]
 fn must_discard_polynomial_of_degree_more_than_t() {
-    let setup = KeygenSimulation::<Secp256k1>::setup(1, 3);
+    let setup = KeygenSimulation::<Secp256k1, Sha256>::setup(1, 3);
 
     let s = Scalar::random();
     let f = Polynomial::sample_exact_with_fixed_const_term(setup.t + 1, s);
@@ -509,7 +510,7 @@ fn must_discard_polynomial_of_degree_more_than_t() {
 #[test]
 fn decrypts_shares() {
     // Encryption setup
-    let setup = KeygenSimulation::<Secp256k1>::setup(1, 3);
+    let setup = KeygenSimulation::<Secp256k1, Sha256>::setup(1, 3);
     // Generate parties' local secrets
     let phase0 = setup.phase0_generate_parties_local_secrets();
     // Share parties' local secrets
@@ -553,7 +554,7 @@ fn decrypts_shares() {
 #[test]
 fn parties_complain_against_incorrect_proof() {
     // Encryption setup
-    let setup = KeygenSimulation::<Secp256k1>::setup(1, 3);
+    let setup = KeygenSimulation::<Secp256k1, Sha256>::setup(1, 3);
     // Generate parties' local secrets
     let phase0 = setup.phase0_generate_parties_local_secrets();
     // Share parties' local secrets
@@ -582,7 +583,7 @@ fn parties_complain_against_incorrect_proof() {
 #[test]
 fn parties_complain_against_invalid_encryption() {
     // Encryption setup
-    let setup = KeygenSimulation::<Secp256k1>::setup(1, 3);
+    let setup = KeygenSimulation::<Secp256k1, Sha256>::setup(1, 3);
     // Generate parties' local secrets
     let phase0 = setup.phase0_generate_parties_local_secrets();
     // Share parties' local secrets
@@ -626,7 +627,7 @@ fn generate_dummy_polynomials<E: Curve>(t: u16, n: u16) -> Vec<Polynomial<E>> {
 
 #[test]
 fn parties_who_received_more_than_t_complaints_against_their_proof_must_be_disqualified() {
-    let keygen = KeygenSimulation::<Secp256k1>::setup(3, 10);
+    let keygen = KeygenSimulation::<Secp256k1, Sha256>::setup(3, 10);
 
     // We generate dummy polynomials that are not expected to be used anyway
     let f = generate_dummy_polynomials(keygen.t, keygen.n);
@@ -667,7 +668,7 @@ fn parties_who_received_more_than_t_complaints_against_their_proof_must_be_disqu
 
 #[test]
 fn parties_who_received_at_most_t_complaints_against_their_proof_dont_get_disqualified() {
-    let keygen = KeygenSimulation::<Secp256k1>::setup(3, 10);
+    let keygen = KeygenSimulation::<Secp256k1, Sha256>::setup(3, 10);
 
     // We generate dummy polynomials that are not expected to be used anyway
     let f = generate_dummy_polynomials(keygen.t, keygen.n);
@@ -706,7 +707,7 @@ fn parties_who_received_at_most_t_complaints_against_their_proof_dont_get_disqua
 
 #[test]
 fn parties_who_received_complaint_against_their_encryption_must_reveal_encryption_materials() {
-    let keygen = KeygenSimulation::<Secp256k1>::setup(3, 10);
+    let keygen = KeygenSimulation::<Secp256k1, Sha256>::setup(3, 10);
 
     // We generate dummy polynomials that are not expected to be used anyway
     let f = generate_dummy_polynomials(keygen.t, keygen.n);
@@ -766,7 +767,7 @@ fn parties_who_received_complaint_against_their_encryption_must_reveal_encryptio
 
 #[test]
 fn complainer_get_disqualified_if_party_proofs_that_encryption_was_correct() {
-    let keygen = KeygenSimulation::<Secp256k1>::setup(3, 10);
+    let keygen = KeygenSimulation::<Secp256k1, Sha256>::setup(3, 10);
     let phase0 = keygen.phase0_generate_parties_local_secrets();
     let phase1 = keygen.phase1_share_and_commit_shares(&phase0);
     let mut phase2 = keygen.phase2_decrypt_shares(&phase1);
@@ -794,7 +795,7 @@ fn complainer_get_disqualified_if_party_proofs_that_encryption_was_correct() {
 
 #[test]
 fn party_gets_disqualified_if_it_incorrectly_encrypts_share() {
-    let keygen = KeygenSimulation::<Secp256k1>::setup(3, 10);
+    let keygen = KeygenSimulation::<Secp256k1, Sha256>::setup(3, 10);
     let phase0 = keygen.phase0_generate_parties_local_secrets();
     let mut phase1 = keygen.phase1_share_and_commit_shares(&phase0);
 
@@ -819,7 +820,7 @@ fn party_gets_disqualified_if_it_incorrectly_encrypts_share() {
 
 #[test]
 fn party_gets_disqualified_if_it_doesnt_publish_justification() {
-    let keygen = KeygenSimulation::<Secp256k1>::setup(3, 10);
+    let keygen = KeygenSimulation::<Secp256k1, Sha256>::setup(3, 10);
     let phase0 = keygen.phase0_generate_parties_local_secrets();
     let phase1 = keygen.phase1_share_and_commit_shares(&phase0);
     let mut phase2 = keygen.phase2_decrypt_shares(&phase1);
@@ -852,7 +853,7 @@ fn party_gets_disqualified_if_it_doesnt_publish_justification() {
 
 #[test]
 fn protocol_terminates_with_no_adversaries() {
-    let keygen = KeygenSimulation::<Secp256k1>::setup(3, 10);
+    let keygen = KeygenSimulation::<Secp256k1, Sha256>::setup(3, 10);
     let phase0 = keygen.phase0_generate_parties_local_secrets();
     let phase1 = keygen.phase1_share_and_commit_shares(&phase0);
     let phase2 = keygen.phase2_decrypt_shares(&phase1);
@@ -866,7 +867,7 @@ fn protocol_terminates_with_no_adversaries() {
 
 #[test]
 fn protocol_terminates_with_t_adversaries_set_false_complaints_against_honest_parties_encryption() {
-    let keygen = KeygenSimulation::<Secp256k1>::setup(3, 10);
+    let keygen = KeygenSimulation::<Secp256k1, Sha256>::setup(3, 10);
     let phase0 = keygen.phase0_generate_parties_local_secrets();
     let phase1 = keygen.phase1_share_and_commit_shares(&phase0);
     let mut phase2 = keygen.phase2_decrypt_shares(&phase1);
@@ -894,7 +895,7 @@ fn protocol_terminates_with_t_adversaries_set_false_complaints_against_honest_pa
 
 #[test]
 fn protocol_terminates_with_t_adversaries_sent_invalid_commit_of_their_local_secrets() {
-    let keygen = KeygenSimulation::<Secp256k1>::setup(3, 10);
+    let keygen = KeygenSimulation::<Secp256k1, Sha256>::setup(3, 10);
     let phase0 = keygen.phase0_generate_parties_local_secrets();
     let phase1 = keygen.phase1_share_and_commit_shares(&phase0);
     let phase2 = keygen.phase2_decrypt_shares(&phase1);
@@ -936,7 +937,7 @@ impl I2J for ShuffleI2J {
 
 #[test]
 fn protocol_terminates_with_parties_choosing_randomly_set_J() {
-    let keygen = KeygenSimulation::<Secp256k1>::setup(3, 10);
+    let keygen = KeygenSimulation::<Secp256k1, Sha256>::setup(3, 10);
     let phase0 = keygen.phase0_generate_parties_local_secrets();
     let phase1 = keygen.phase1_share_and_commit_shares(&phase0);
     let phase2 = keygen.phase2_decrypt_shares(&phase1);
@@ -952,15 +953,15 @@ fn protocol_terminates_with_parties_choosing_randomly_set_J() {
     let (_tsk, _decryption, _tpk) = keygen.phase8_construct_elgamal_keys(&phase6, &phase7);
 }
 
-fn analyse_keygen_measurements<E: Curve>(
+fn analyse_keygen_measurements<E: Curve, H: Digest + Clone>(
     name: String,
     phase0: &Phase0GeneratedLocalSecrets<E>,
-    phase1: &Phase1SharedAndCommittedSecret<E>,
+    phase1: &Phase1SharedAndCommittedSecret<E, H>,
     phase2: &Phase2DecryptedShares<E>,
     phase3: Option<&Phase3PublishedJustifications<E>>,
     phase4: Option<&Phase4ProcessedJustifications>,
-    phase5: &Phase5SetQ<E>,
-    phase6: &Phase6ConstructedAndCommittedLocalSecret<E>,
+    phase5: &Phase5SetQ<E, H>,
+    phase6: &Phase6ConstructedAndCommittedLocalSecret<E, H>,
 ) {
     use crate::utils::performance_analysis::*;
 
@@ -992,7 +993,7 @@ fn keygen_protocol_performance() {
     for n in (5..=45).step_by(10) {
         let t = n / 3;
 
-        let keygen = KeygenSimulation::<Secp256k1>::setup(t, n);
+        let keygen = KeygenSimulation::<Secp256k1, Sha256>::setup(t, n);
         let phase0 = keygen.phase0_generate_parties_local_secrets();
         let phase1 = keygen.phase1_share_and_commit_shares(&phase0);
         let phase2 = keygen.phase2_decrypt_shares(&phase1);
@@ -1026,7 +1027,7 @@ fn bls_keygen_protocol_performance() {
     for n in (5..=60).step_by(5) {
         let t = n / 3;
 
-        let keygen = KeygenSimulation::<Bls12_381_2>::setup(t, n);
+        let keygen = KeygenSimulation::<Bls12_381_2, Sha256>::setup(t, n);
         let phase0 = keygen.phase0_generate_parties_local_secrets();
         let phase1 = keygen.phase1_share_and_commit_shares(&phase0);
         let phase2 = keygen.phase2_decrypt_shares(&phase1);
@@ -1050,13 +1051,13 @@ fn bls_keygen_protocol_performance() {
     }
 }
 
-fn analyse_communication_size<E: Curve>(
+fn analyse_communication_size<E: Curve, H: Digest + Clone>(
     t: u16,
     n: u16,
-    phase1: &Phase1SharedAndCommittedSecret<E>,
+    phase1: &Phase1SharedAndCommittedSecret<E, H>,
     phase2: Option<&Phase2DecryptedShares<E>>,
     phase3: Option<&Phase3PublishedJustifications<E>>,
-    phase6: &Phase6ConstructedAndCommittedLocalSecret<E>,
+    phase6: &Phase6ConstructedAndCommittedLocalSecret<E, H>,
 ) {
     let phase1_size = bincode::serialize(phase1.board[0].as_ref().unwrap())
         .unwrap()
@@ -1108,7 +1109,7 @@ fn keygen_protocol_communication_size() {
     for n in (5..=45).step_by(10) {
         let t = n / 3;
 
-        let keygen = KeygenSimulation::<Secp256k1>::setup(t, n);
+        let keygen = KeygenSimulation::<Secp256k1, Sha256>::setup(t, n);
         let phase0 = keygen.phase0_generate_parties_local_secrets();
         let phase1 = keygen.phase1_share_and_commit_shares(&phase0);
         let phase2 = keygen.phase2_decrypt_shares(&phase1);
@@ -1137,7 +1138,7 @@ fn bls_keygen_protocol_communication_size() {
     for n in (5..=60).step_by(5) {
         let t = n / 3;
 
-        let keygen = KeygenSimulation::<Bls12_381_2>::setup(t, n);
+        let keygen = KeygenSimulation::<Bls12_381_2, Sha256>::setup(t, n);
         let phase0 = keygen.phase0_generate_parties_local_secrets();
         let phase1 = keygen.phase1_share_and_commit_shares(&phase0);
         let phase2 = keygen.phase2_decrypt_shares(&phase1);

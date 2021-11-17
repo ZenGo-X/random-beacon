@@ -2,20 +2,22 @@ use std::iter::{self, FromIterator};
 use std::marker::PhantomData;
 use std::time::{Duration, Instant};
 
+use sha2::{Digest, Sha256};
+
 use curv::cryptographic_primitives::secret_sharing::Polynomial;
 use curv::elliptic::curves::*;
 
 use crate::tier1::core::*;
 use crate::utils::IteratorExt;
 
-pub struct Tier1Simulation<E: Curve> {
-    parties: Vec<ProtocolSetup<E>>,
+pub struct Tier1Simulation<E: Curve, H: Digest + Clone> {
+    parties: Vec<ProtocolSetup<E, H>>,
     t: u16,
     l: u16,
     n: u16,
 }
 
-impl<E: Curve> Tier1Simulation<E> {
+impl<E: Curve, H: Digest + Clone> Tier1Simulation<E, H> {
     pub fn setup(l: u16, t: u16, n: u16) -> Self {
         let α = Scalar::random();
         let M = ResilientMatrix::new(α, n - 2 * t, n - t);
@@ -57,9 +59,9 @@ impl<E: Curve> Tier1Simulation<E> {
     pub fn phase1_commit_local_secret<F>(
         &self,
         phase0: &Phase0GeneratedLocalSecrets<E>,
-    ) -> Phase1CommittedLocalSecret<E>
+    ) -> Phase1CommittedLocalSecret<E, H>
     where
-        F: FilterOutTMessages<SharedSecret<E>>,
+        F: FilterOutTMessages<SharedSecret<E, H>>,
     {
         let mut shares = Vec::with_capacity(usize::from(self.n));
         let mut took = Vec::with_capacity(usize::from(self.n));
@@ -91,7 +93,7 @@ impl<E: Curve> Tier1Simulation<E> {
     pub fn phase2_reveal_secrets(
         &self,
         phase0: &Phase0GeneratedLocalSecrets<E>,
-        phase1: &Phase1CommittedLocalSecret<E>,
+        phase1: &Phase1CommittedLocalSecret<E, H>,
     ) -> Phase2RevealedSecrets<E> {
         let mut revealed_secrets = vec![];
 
@@ -110,7 +112,7 @@ impl<E: Curve> Tier1Simulation<E> {
 
     pub fn phase3_process_revealed_secrets(
         &self,
-        phase1: &Phase1CommittedLocalSecret<E>,
+        phase1: &Phase1CommittedLocalSecret<E, H>,
         phase2: &Phase2RevealedSecrets<E>,
     ) -> Phase3ProcessedRevealedSecrets<E> {
         let mut parties_who_didnt_open_their_secrets = None;
@@ -152,9 +154,9 @@ impl<E: Curve> Tier1Simulation<E> {
 
     pub fn phase4_partially_open_secrets<S>(
         &self,
-        phase1: &Phase1CommittedLocalSecret<E>,
+        phase1: &Phase1CommittedLocalSecret<E, H>,
         phase3: &Phase3ProcessedRevealedSecrets<E>,
-    ) -> Phase4PartiallyOpenSecret<E>
+    ) -> Phase4PartiallyOpenSecret<E, H>
     where
         S: ShuffleMessagesOrder,
     {
@@ -200,9 +202,9 @@ impl<E: Curve> Tier1Simulation<E> {
 
     pub fn phase5_reconstruct_secrets(
         &self,
-        phase1: &Phase1CommittedLocalSecret<E>,
+        phase1: &Phase1CommittedLocalSecret<E, H>,
         phase3: &Phase3ProcessedRevealedSecrets<E>,
-        phase4: &Phase4PartiallyOpenSecret<E>,
+        phase4: &Phase4PartiallyOpenSecret<E, H>,
     ) -> Phase5ReconstructedSecrets<E> {
         let mut reconstructed_secrets = None;
         let mut took = Vec::with_capacity(usize::from(self.n));
@@ -319,15 +321,15 @@ pub struct Phase0GeneratedLocalSecrets<E: Curve> {
     pub took: Vec<Duration>,
 }
 
-pub struct Phase1CommittedLocalSecret<E: Curve> {
+pub struct Phase1CommittedLocalSecret<E: Curve, H: Digest + Clone> {
     /// $\text{shares}_i$ is a list of committed shares produced by $\ith$ party
-    pub shares: Vec<SharedSecret<E>>,
+    pub shares: Vec<SharedSecret<E, H>>,
 
     /// $\text{board}_i$ is a committed share published by $\ith$ party. Must contain exactly $n-t$
     /// **valid** shares that were published first
     ///
     /// By default, simulation chooses random $n-t$ shares
-    pub board: Msgs<SharedSecret<E>>,
+    pub board: Msgs<SharedSecret<E, H>>,
 
     /// $took_i$ shows how much time it took for $\ith$ party to complete this phase
     pub took: Vec<Duration>,
@@ -358,9 +360,9 @@ pub struct Phase3ProcessedRevealedSecrets<E: Curve> {
     pub took: Vec<Duration>,
 }
 
-pub struct Phase4PartiallyOpenSecret<E: Curve> {
+pub struct Phase4PartiallyOpenSecret<E: Curve, H: Digest + Clone> {
     /// $\text{partially_opened_secrets}_i$ is a partial opening made by $\ith$ party
-    pub partially_opened_secrets: Vec<Vec<PartiallyOpenedSecret<E>>>,
+    pub partially_opened_secrets: Vec<Vec<PartiallyOpenedSecret<E, H>>>,
 
     /// `board_order` sets the order in which `partially_opened_secrets` were published on board.
     ///
@@ -368,7 +370,7 @@ pub struct Phase4PartiallyOpenSecret<E: Curve> {
     /// opening first, next arrived message on board is from party 0, and then party 1.
     ///
     /// By default, simulation chooses random order of messages
-    pub board_order: Vec<(u16, Vec<PartiallyOpenedSecret<E>>)>,
+    pub board_order: Vec<(u16, Vec<PartiallyOpenedSecret<E, H>>)>,
 
     /// $took_i$ shows how much time it took for $\ith$ party to complete this phase
     pub took: Vec<Duration>,
@@ -440,7 +442,7 @@ impl ShuffleMessagesOrder for DontShuffleMessagesOrder {
 
 #[test]
 fn protocol_terminates_with_no_adversaries() {
-    let tier1 = Tier1Simulation::<Secp256k1>::setup(2, 3, 10);
+    let tier1 = Tier1Simulation::<Secp256k1, Sha256>::setup(2, 3, 10);
     let phase0 = tier1.phase0_generate_local_secrets();
     let phase1 = tier1.phase1_commit_local_secret::<FilterOutTRandomMessages<_>>(&phase0);
     let phase2 = tier1.phase2_reveal_secrets(&phase0, &phase1);
@@ -456,7 +458,7 @@ fn protocol_terminates_with_no_adversaries() {
 
 #[test]
 fn protocol_terminates_with_t_adversaries_not_revealing_secrets_and_sabotaging_reconstruction() {
-    let tier1 = Tier1Simulation::<Secp256k1>::setup(2, 3, 10);
+    let tier1 = Tier1Simulation::<Secp256k1, Sha256>::setup(2, 3, 10);
     let phase0 = tier1.phase0_generate_local_secrets();
     let phase1 = tier1.phase1_commit_local_secret::<FilterOutTLastMessages<_>>(&phase0);
     let mut phase2 = tier1.phase2_reveal_secrets(&phase0, &phase1);
@@ -500,7 +502,7 @@ fn protocol_terminates_with_t_adversaries_not_revealing_secrets_and_sabotaging_r
 
 #[test]
 fn party_is_cooperative_if_opened_its_secrets() {
-    let tier1 = Tier1Simulation::<Secp256k1>::setup(2, 3, 10);
+    let tier1 = Tier1Simulation::<Secp256k1, Sha256>::setup(2, 3, 10);
     let phase0 = tier1.phase0_generate_local_secrets();
     let phase1 = tier1.phase1_commit_local_secret::<FilterOutTRandomMessages<_>>(&phase0);
     let phase2 = tier1.phase2_reveal_secrets(&phase0, &phase1);
@@ -529,7 +531,7 @@ fn party_is_cooperative_if_opened_its_secrets() {
 
 #[test]
 fn party_is_uncooperative_if_it_refuses_to_reveal_secret() {
-    let tier1 = Tier1Simulation::<Secp256k1>::setup(2, 3, 10);
+    let tier1 = Tier1Simulation::<Secp256k1, Sha256>::setup(2, 3, 10);
     let phase0 = tier1.phase0_generate_local_secrets();
     let phase1 = tier1.phase1_commit_local_secret::<FilterOutTLastMessages<_>>(&phase0);
     let mut phase2 = tier1.phase2_reveal_secrets(&phase0, &phase1);
@@ -545,7 +547,7 @@ fn party_is_uncooperative_if_it_refuses_to_reveal_secret() {
 
 #[test]
 fn party_is_uncooperative_if_it_reveals_wrong_secret() {
-    let tier1 = Tier1Simulation::<Secp256k1>::setup(2, 3, 10);
+    let tier1 = Tier1Simulation::<Secp256k1, Sha256>::setup(2, 3, 10);
     let phase0 = tier1.phase0_generate_local_secrets();
     let phase1 = tier1.phase1_commit_local_secret::<FilterOutTLastMessages<_>>(&phase0);
     let mut phase2 = tier1.phase2_reveal_secrets(&phase0, &phase1);
@@ -561,7 +563,7 @@ fn party_is_uncooperative_if_it_reveals_wrong_secret() {
 
 #[test]
 fn honest_majority_can_recover_unopened_secret() {
-    let tier1 = Tier1Simulation::<Secp256k1>::setup(2, 3, 10);
+    let tier1 = Tier1Simulation::<Secp256k1, Sha256>::setup(2, 3, 10);
     let phase0 = tier1.phase0_generate_local_secrets();
     let phase1 = tier1.phase1_commit_local_secret::<FilterOutTLastMessages<_>>(&phase0);
     let mut phase2 = tier1.phase2_reveal_secrets(&phase0, &phase1);
@@ -593,7 +595,7 @@ fn honest_majority_can_recover_unopened_secret() {
 
 #[test]
 fn honest_majority_can_recover_two_unopened_secret() {
-    let tier1 = Tier1Simulation::<Secp256k1>::setup(2, 3, 10);
+    let tier1 = Tier1Simulation::<Secp256k1, Sha256>::setup(2, 3, 10);
     let phase0 = tier1.phase0_generate_local_secrets();
     let phase1 = tier1.phase1_commit_local_secret::<FilterOutTLastMessages<_>>(&phase0);
     let mut phase2 = tier1.phase2_reveal_secrets(&phase0, &phase1);
@@ -638,12 +640,12 @@ fn honest_majority_can_recover_two_unopened_secret() {
     assert_eq!(phase5.reconstructed_secrets, expected_reconstructed_secrets);
 }
 
-fn analyse_tier1_measurements<E: Curve>(
+fn analyse_tier1_measurements<E: Curve, H: Digest + Clone>(
     name: String,
     phase0: &Phase0GeneratedLocalSecrets<E>,
-    phase1: &Phase1CommittedLocalSecret<E>,
+    phase1: &Phase1CommittedLocalSecret<E, H>,
     phase3: &Phase3ProcessedRevealedSecrets<E>,
-    phase4: Option<&Phase4PartiallyOpenSecret<E>>,
+    phase4: Option<&Phase4PartiallyOpenSecret<E, H>>,
     phase5: Option<&Phase5ReconstructedSecrets<E>>,
     phase6: &Phase6Aggregation<E>,
 ) {
@@ -676,7 +678,7 @@ fn tier1_protocol_performance_with_no_adversaries() {
 
     for n in (5..=45).step_by(10) {
         let t = n / 3;
-        let tier1 = Tier1Simulation::<Bls12_381_1>::setup(1, t, n);
+        let tier1 = Tier1Simulation::<Bls12_381_1, Sha256>::setup(1, t, n);
         let phase0 = tier1.phase0_generate_local_secrets();
         let phase1 = tier1.phase1_commit_local_secret::<FilterOutTRandomMessages<_>>(&phase0);
         let phase2 = tier1.phase2_reveal_secrets(&phase0, &phase1);
@@ -707,7 +709,7 @@ fn tier1_protocol_performance_with_a_adversaries() {
     let (n, t) = (25, 25 / 3);
     for a in (0..=8).step_by(2) {
         // In this protocol, we have `a` adversaries not revealing their secrets and sabotaging reconstruction
-        let tier1 = Tier1Simulation::<Secp256k1>::setup(1, t, n);
+        let tier1 = Tier1Simulation::<Secp256k1, Sha256>::setup(1, t, n);
         let phase0 = tier1.phase0_generate_local_secrets();
         let phase1 = tier1.phase1_commit_local_secret::<FilterOutTLastMessages<_>>(&phase0);
         let mut phase2 = tier1.phase2_reveal_secrets(&phase0, &phase1);
@@ -753,7 +755,7 @@ fn tier1_protocol_performance_with_no_adversaries_for_various_t() {
 
     let n = 25;
     for t in (2..=8).step_by(2) {
-        let tier1 = Tier1Simulation::<Secp256k1>::setup(1, t, n);
+        let tier1 = Tier1Simulation::<Secp256k1, Sha256>::setup(1, t, n);
         let phase0 = tier1.phase0_generate_local_secrets();
         let phase1 = tier1.phase1_commit_local_secret::<FilterOutTRandomMessages<_>>(&phase0);
         let phase2 = tier1.phase2_reveal_secrets(&phase0, &phase1);
@@ -784,7 +786,7 @@ fn tier1_protocol_performance_with_no_adversaries_for_various_ell() {
     let n = 25;
     let t = 8;
     for ell in (1..=9).step_by(2) {
-        let tier1 = Tier1Simulation::<Secp256k1>::setup(ell, t, n);
+        let tier1 = Tier1Simulation::<Secp256k1, Sha256>::setup(ell, t, n);
         let phase0 = tier1.phase0_generate_local_secrets();
         let phase1 = tier1.phase1_commit_local_secret::<FilterOutTRandomMessages<_>>(&phase0);
         let phase2 = tier1.phase2_reveal_secrets(&phase0, &phase1);
@@ -820,7 +822,7 @@ fn tier1_protocol_communication_size_with_no_adversaries() {
         println!();
 
         let t = n / 3;
-        let tier1 = Tier1Simulation::<Secp256k1>::setup(1, t, n);
+        let tier1 = Tier1Simulation::<Secp256k1, Sha256>::setup(1, t, n);
         let phase0 = tier1.phase0_generate_local_secrets();
         let phase1 = tier1.phase1_commit_local_secret::<FilterOutTLastMessages<_>>(&phase0);
         let phase2 = tier1.phase2_reveal_secrets(&phase0, &phase1);
@@ -864,7 +866,7 @@ fn tier1_protocol_communication_with_adversaries() {
         println!();
 
         // In this protocol, we have `a` adversaries not revealing their secrets and sabotaging reconstruction
-        let tier1 = Tier1Simulation::<Secp256k1>::setup(1, t, n);
+        let tier1 = Tier1Simulation::<Secp256k1, Sha256>::setup(1, t, n);
         let phase0 = tier1.phase0_generate_local_secrets();
         let phase1 = tier1.phase1_commit_local_secret::<FilterOutTLastMessages<_>>(&phase0);
         let mut phase2 = tier1.phase2_reveal_secrets(&phase0, &phase1);
